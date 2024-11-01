@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  mongo1:
+    image: mongo:5
+    container_name: mongo1
+    command: mongod --replSet myReplicaSet --bind_ip localhost,mongo1
+    networks:
+      - mongoCluster
+    ports:
+      - "27017:27017"
+    restart: always
+
+  mongo2:
+    image: mongo:5
+    container_name: mongo2
+    command: mongod --replSet myReplicaSet --bind_ip localhost,mongo2
+    networks:
+      - mongoCluster
+    ports:
+      - "27018:27017"
+    restart: always
+
+  mongo3:
+    image: mongo:5
+    container_name: mongo3
+    command: mongod --replSet myReplicaSet --bind_ip localhost,mongo3
+    networks:
+      - mongoCluster
+    ports:
+      - "27019:27017"
+    restart: always
+
+  mongo-init-replica:
+    image: mongo:5
+    container_name: mongo-init-replica
+    depends_on:
+      - mongo1
+      - mongo2
+      - mongo3
+    networks:
+      - mongoCluster
+    entrypoint: >
+      bash -c "
+      for i in {1..10}; do
+        mongosh --host mongo1 --eval 'db.adminCommand({ ping: 1 })' && break || echo 'Waiting for mongo1 to be ready...' && sleep 5;
+      done &&
+      mongosh --host mongo1 --eval '
+        rs.initiate({
+          _id: \"myReplicaSet\",
+          members: [
+            { _id: 0, host: \"mongo1:27017\" },
+            { _id: 1, host: \"mongo2:27017\" },
+            { _id: 2, host: \"mongo3:27017\" }
+          ]
+        })
+      '"
+    restart: "on-failure"
+
+  node-app:
+    build: .
+    container_name: node-app
+    networks:
+      - mongoCluster
+    ports:
+      - "3001:3001"
+    depends_on:
+      - mongo-init-replica
+    environment:
+      DB_URI: mongodb://mongo1:27017,mongo2:27017,mongo3:27017/users?replicaSet=myReplicaSet
+
+networks:
+  mongoCluster:
+    driver: bridge
